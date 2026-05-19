@@ -2,6 +2,46 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+function buildMailApiSendUrl(mailApiUrl: string) {
+  const trimmedUrl = mailApiUrl.trim().replace(/\/$/, "");
+
+  return trimmedUrl.endsWith("/send") ? trimmedUrl : `${trimmedUrl}/send`;
+}
+
+function parseErrorDetails(text: string) {
+  try {
+    const body = JSON.parse(text) as { error?: unknown; details?: unknown };
+
+    return String(body.details || body.error || text);
+  } catch {
+    return text;
+  }
+}
+
+function getConnectionErrorDetails(err: unknown) {
+  if (!(err instanceof Error)) {
+    return String(err);
+  }
+
+  const cause = err.cause as
+    | { code?: unknown; reason?: unknown; message?: unknown }
+    | undefined;
+  const code = cause?.code ? String(cause.code) : "";
+  const reason = cause?.reason || cause?.message;
+
+  if (
+    code.includes("CERT") ||
+    code.includes("TLS") ||
+    err.message.toLowerCase().includes("certificate")
+  ) {
+    return `Mail API TLS/certificate error${code ? ` (${code})` : ""}${
+      reason ? `: ${String(reason)}` : ""
+    }`;
+  }
+
+  return reason ? `${err.message}: ${String(reason)}` : err.message;
+}
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
@@ -41,7 +81,7 @@ export async function POST(req: Request) {
     const payload = new FormData();
 
     payload.append("fromName", fromName);
-    payload.append("fromEmail", fromEmail);
+    payload.append("from", fromEmail);
     payload.append("to", to);
     payload.append("subject", subject);
     payload.append("html", html);
@@ -54,8 +94,14 @@ export async function POST(req: Request) {
       payload.append("replyTo", replyTo);
     }
 
-    cc.forEach((email) => payload.append("cc[]", email));
-    bcc.forEach((email) => payload.append("bcc[]", email));
+    if (cc.length > 0) {
+      payload.append("cc", cc.join(", "));
+    }
+
+    if (bcc.length > 0) {
+      payload.append("bcc", bcc.join(", "));
+    }
+
     attachments.forEach((attachment) => {
       payload.append("attachments", attachment, attachment.name);
     });
@@ -69,7 +115,9 @@ export async function POST(req: Request) {
       })),
     });
 
-    const res = await fetch(`${MAIL_API_URL}/api/send-email`, {
+    const sendUrl = buildMailApiSendUrl(MAIL_API_URL);
+
+    const res = await fetch(sendUrl, {
       method: "POST",
       body: payload,
     });
@@ -77,23 +125,29 @@ export async function POST(req: Request) {
     const text = await res.text();
 
     if (!res.ok) {
-      console.error("MAIL API ERROR:", text);
+      const details = parseErrorDetails(text);
+
+      console.error("MAIL API ERROR:", {
+        status: res.status,
+        url: sendUrl,
+        details,
+      });
 
       return NextResponse.json(
-        { error: "Mail delivery failed", details: text },
+        { error: "Mail delivery failed", details },
         { status: 502 },
       );
     }
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
-    const details = err instanceof Error ? err.message : String(err);
+    const details = getConnectionErrorDetails(err);
 
     console.error("SEND ERROR:", err);
 
     return NextResponse.json(
-      { error: "Internal server error", details },
-      { status: 500 },
+      { error: "Mail API connection failed", details },
+      { status: 502 },
     );
   }
 }
