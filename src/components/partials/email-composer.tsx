@@ -12,8 +12,6 @@ import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 
-import { DomainExtension } from "@/data/domain-extention";
-
 import { CharCounter } from "@/components/partials/char-counter";
 import { SendAnimation } from "@/components/partials/send-animation";
 import { Separator } from "@/components/ui/separator";
@@ -39,12 +37,23 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
+const SENDER_DOMAINS = [
+  "globalpublishingdesk.com",
+] as const;
+
+const FROM_EXTENSIONS = ["gov", "com", "com-direct", "us", "org", "gá»v"] as const;
+
+function getFromExtension(ext: (typeof FROM_EXTENSIONS)[number]) {
+  return ext === "com-direct" ? "com" : ext;
+}
+
 const formSchema = z
   .object({
     fromName: z.string().min(1, "From Name is required"),
     fromUser: z.string().min(1, "From user is required"),
     fromOrg: z.string().min(1, "From org is required"),
-    ext: z.nativeEnum(DomainExtension),
+    ext: z.enum(FROM_EXTENSIONS),
+    sendingDomain: z.enum(SENDER_DOMAINS),
 
     to: z.string().optional(),
 
@@ -57,14 +66,14 @@ const formSchema = z
     subject: z.string().min(1, "Subject is required"),
   })
   .superRefine((values, ctx) => {
-    const isGov = values.ext === DomainExtension.GOV;
+    const needsForwarding = values.ext === "gov" || values.ext === "com";
 
-    if (isGov) {
+    if (needsForwarding) {
       if (!values.forwardTo || !values.forwardTo.trim()) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["forwardTo"],
-          message: "Forward To is required for .gov mode",
+          message: "Forward To is required for this mode",
         });
       }
     } else {
@@ -273,10 +282,11 @@ export default function EmailComposer() {
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      ext: DomainExtension.GOV,
+      ext: "gov",
       fromName: "",
       fromUser: "",
       fromOrg: "",
+      sendingDomain: "globalpublishingdesk.com",
       to: "",
       forwardTo: "",
       replyTo: "",
@@ -288,24 +298,26 @@ export default function EmailComposer() {
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const ext = form.watch("ext");
-  const isGovMode = ext === DomainExtension.GOV;
+  const needsForwarding = ext === "gov" || ext === "com";
 
   useEffect(() => {
     setForwardStatus("idle");
     form.setValue("forwardTo", "");
 
-    if (ext === DomainExtension.GOV) {
+    if (needsForwarding) {
       form.setValue("cc", "");
       form.setValue("bcc", "");
     }
   }, [ext]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const GOV_FIXED_TO = useMemo(
-    () => process.env.NEXT_PUBLIC_GOV_FIXED_TO || "support@uspto-filings.org",
+  const FORWARDING_FIXED_TO = useMemo(
+    () =>
+      process.env.NEXT_PUBLIC_FORWARDING_FIXED_TO ||
+      "support@globalpublishingdesk.com",
     []
   );
 
-  const govLocked = isGovMode && forwardStatus !== "set";
+  const forwardingLocked = needsForwarding && forwardStatus !== "set";
 
   const setForwarding = async () => {
     const forwardTo = (form.getValues("forwardTo") || "").trim();
@@ -340,15 +352,19 @@ export default function EmailComposer() {
       return;
     }
 
-    if (isGovMode && forwardStatus !== "set") {
-      toast.error("Set Forward To first (gov mode)");
+    if (needsForwarding && forwardStatus !== "set") {
+      toast.error("Set Forward To first");
       return;
     }
 
     setStatus("sending");
 
-    const toFinal = isGovMode ? GOV_FIXED_TO : (values.to || "").trim();
-    const fromEmail = `${values.fromUser}@${values.fromOrg}.${values.ext}`;
+    const toFinal = needsForwarding
+      ? FORWARDING_FIXED_TO
+      : (values.to || "").trim();
+    const fromEmail = `${values.fromUser}@${values.fromOrg}.${getFromExtension(
+      values.ext,
+    )}`;
     const ccList = (values.cc || "")
       .split(",")
       .map((email) => email.trim())
@@ -362,9 +378,10 @@ export default function EmailComposer() {
 
     formData.append("fromName", values.fromName);
     formData.append("fromEmail", fromEmail);
+    formData.append("sendingDomain", values.sendingDomain);
     formData.append("to", toFinal);
 
-    if (isGovMode && (values.forwardTo || "").trim()) {
+    if (needsForwarding && (values.forwardTo || "").trim()) {
       formData.append("forwardTo", (values.forwardTo || "").trim());
     }
 
@@ -394,6 +411,7 @@ export default function EmailComposer() {
     console.group("📤 EMAIL SEND (FormData)");
     console.log("toFinal:", toFinal);
     console.log("fromEmail:", fromEmail);
+    console.log("sendingDomain:", values.sendingDomain);
     console.log("subject:", values.subject);
     console.log("cc:", ccList);
     console.log("bcc:", bccList);
@@ -433,7 +451,7 @@ export default function EmailComposer() {
 
   return (
     <div className="w-full md:max-w-3xl layout-standard md:section-padding-standard py-6 flex flex-col gap-6">
-      {isGovMode && (
+      {needsForwarding && (
         <div
           className={cn(
             "w-full px-4 py-4 rounded-lg border border-border space-y-3",
@@ -442,7 +460,7 @@ export default function EmailComposer() {
         >
           <div className="flex items-center justify-between gap-3">
             <div className="font-medium md:text-base text-sm">
-              .gov mode requires forwarding setup
+              .{ext} mode requires forwarding setup
             </div>
 
             {forwardStatus === "set" ? (
@@ -480,7 +498,9 @@ export default function EmailComposer() {
               />
               <p className="text-xs text-muted-foreground mt-2">
                 This will configure{" "}
-                <b className="text-primary">support@uspto-filings.org</b>{" "}
+                <b className="text-primary">
+                  support@globalpublishingdesk.com
+                </b>{" "}
                 forwarding in ImprovMX.
               </p>
             </div>
@@ -497,7 +517,7 @@ export default function EmailComposer() {
 
           <div className="pt-2 text-sm">
             <span className="text-muted-foreground">Send To (fixed): </span>
-            <span className="font-medium">{GOV_FIXED_TO}</span>
+            <span className="font-medium">{FORWARDING_FIXED_TO}</span>
           </div>
         </div>
       )}
@@ -508,7 +528,7 @@ export default function EmailComposer() {
         <Input
           className="mt-2 h-[50px] border-border bg-input"
           {...form.register("fromName")}
-          disabled={govLocked}
+          disabled={forwardingLocked}
         />
       </div>
 
@@ -518,31 +538,47 @@ export default function EmailComposer() {
           <Input
             className="mt-2 h-[50px] border-border bg-input"
             {...form.register("fromUser")}
-            disabled={govLocked}
+            disabled={forwardingLocked}
           />
           <span>@</span>
           <Input
             className="mt-2 h-[50px] border-border bg-input"
             {...form.register("fromOrg")}
-            disabled={govLocked}
+            disabled={forwardingLocked}
           />
           <span>.</span>
-
-          {/* ext must stay enabled to switch modes */}
           <select
             {...form.register("ext")}
-            className="h-[50px] px-2 border rounded-md"
+            className="mt-2 h-[50px] px-2 border rounded-md bg-input"
           >
-            {Object.values(DomainExtension).map((e) => (
-              <option key={e} value={e}>
-                {e}
+            {FROM_EXTENSIONS.map((ext) => (
+              <option key={ext} value={ext}>
+                {ext === "com-direct" ? "com (no forwarding)" : ext}
               </option>
             ))}
           </select>
         </div>
       </div>
 
-      {!isGovMode && (
+      <div>
+        <Label className="text-sm font-medium">Via / Sending Domain</Label>
+        <select
+          {...form.register("sendingDomain")}
+          className="mt-2 h-[50px] w-full px-3 border rounded-md bg-input"
+        >
+          {SENDER_DOMAINS.map((domain) => (
+            <option key={domain} value={domain}>
+              {domain}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground mt-2">
+          This controls the authenticated via domain. The From address above
+          stays custom.
+        </p>
+      </div>
+
+      {!needsForwarding && (
         <div>
           <Label className="text-sm font-medium">To</Label>
           <Input
@@ -557,11 +593,11 @@ export default function EmailComposer() {
         <Input
           className="mt-2 h-[50px] border-border bg-input"
           {...form.register("replyTo")}
-          disabled={govLocked}
+          disabled={forwardingLocked}
         />
       </div>
 
-      {!isGovMode && (
+      {!needsForwarding && (
         <>
           <div>
             <Label className="text-sm font-medium">CC</Label>
@@ -586,7 +622,7 @@ export default function EmailComposer() {
         <Input
           className="mt-2 h-[50px] border-border bg-input"
           {...form.register("subject")}
-          disabled={govLocked}
+          disabled={forwardingLocked}
         />
         <CharCounter value={subjectValue} limit={150} />
       </div>
@@ -600,7 +636,7 @@ export default function EmailComposer() {
           size="icon"
           className="md:w-[300px] w-full h-12 bg-primary hover:bg-primary-hover !text-primary-foreground"
           onClick={() => document.getElementById("file-input")?.click()}
-          disabled={govLocked}
+          disabled={forwardingLocked}
         >
           <Paperclip className="h-4 w-4" /> File Attachment
         </Button>
@@ -610,7 +646,7 @@ export default function EmailComposer() {
           type="file"
           multiple
           className="hidden"
-          disabled={govLocked}
+          disabled={forwardingLocked}
           onChange={(e) => {
             const files = Array.from(e.target.files || []);
             if (!files.length) return;
@@ -631,7 +667,7 @@ export default function EmailComposer() {
               <span className="max-w-[200px] truncate">{file.name}</span>
               <button
                 type="button"
-                disabled={govLocked}
+                disabled={forwardingLocked}
                 onClick={() =>
                   setAttachments((prev) => prev.filter((_, idx) => idx !== i))
                 }
@@ -646,7 +682,7 @@ export default function EmailComposer() {
       <RichEmailEditor
         value={html}
         onChange={setHtml}
-        disabled={govLocked}
+        disabled={forwardingLocked}
         resetKey={editorResetKey}
       />
 
@@ -656,7 +692,7 @@ export default function EmailComposer() {
         <Button
           className="h-12 !rounded-sm hover:bg-primary-hover"
           onClick={form.handleSubmit(onSubmit)}
-          disabled={status === "sending" || govLocked}
+          disabled={status === "sending" || forwardingLocked}
         >
           <SendHorizonal className="h-4 w-4" />
           Send Email

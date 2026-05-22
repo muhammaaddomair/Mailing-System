@@ -8,6 +8,14 @@ function buildMailApiSendUrl(mailApiUrl: string) {
   return trimmedUrl.endsWith("/send") ? trimmedUrl : `${trimmedUrl}/send`;
 }
 
+const ALLOWED_SENDING_DOMAINS = [
+  "globalpublishingdesk.com",
+];
+
+function normalizeSendingDomain(domain: FormDataEntryValue | null) {
+  return String(domain || "globalpublishingdesk.com").trim().toLowerCase();
+}
+
 function parseErrorDetails(text: string) {
   try {
     const body = JSON.parse(text) as { error?: unknown; details?: unknown };
@@ -49,6 +57,7 @@ export async function POST(req: Request) {
     const fromName = String(formData.get("fromName") || "");
     const fromEmail = String(formData.get("fromEmail") || "");
     const to = String(formData.get("to") || "");
+    const sendingDomain = normalizeSendingDomain(formData.get("sendingDomain"));
     const subject = String(formData.get("subject") || "");
     const html = String(formData.get("html") || "");
     const forwardTo = String(formData.get("forwardTo") || "");
@@ -68,6 +77,13 @@ export async function POST(req: Request) {
       );
     }
 
+    if (!ALLOWED_SENDING_DOMAINS.includes(sendingDomain)) {
+      return NextResponse.json(
+        { error: "Invalid sending domain" },
+        { status: 400 },
+      );
+    }
+
     const MAIL_API_URL = process.env.MAIL_API_URL;
 
     if (!MAIL_API_URL) {
@@ -82,6 +98,11 @@ export async function POST(req: Request) {
 
     payload.append("fromName", fromName);
     payload.append("from", fromEmail);
+    payload.append("visibleFrom", fromEmail);
+    payload.append("sendingDomain", sendingDomain);
+    payload.append("viaDomain", sendingDomain);
+    payload.append("senderDomain", sendingDomain);
+    payload.append("envelopeFrom", `mailer@${sendingDomain}`);
     payload.append("to", to);
     payload.append("subject", subject);
     payload.append("html", html);
@@ -106,7 +127,9 @@ export async function POST(req: Request) {
       payload.append("attachments", attachment, attachment.name);
     });
 
-    console.log("SEND ROUTE ATTACHMENTS:", {
+    console.log("SEND ROUTE PAYLOAD:", {
+      fromEmail,
+      sendingDomain,
       count: attachments.length,
       files: attachments.map((attachment) => ({
         name: attachment.name,
@@ -139,7 +162,11 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      sendingDomain,
+      mailApiResponse: parseErrorDetails(text),
+    });
   } catch (err: unknown) {
     const details = getConnectionErrorDetails(err);
 
