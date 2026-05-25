@@ -41,11 +41,7 @@ const SENDER_DOMAINS = [
   "uspto-filings.org",
 ] as const;
 
-const FROM_EXTENSIONS = ["gov", "com", "com-direct", "us", "org", "gá»v"] as const;
-
-function getFromExtension(ext: (typeof FROM_EXTENSIONS)[number]) {
-  return ext === "com-direct" ? "com" : ext;
-}
+const FROM_EXTENSIONS = ["gov", "com", "us", "org", "gọv"] as const;
 
 const formSchema = z
   .object({
@@ -66,7 +62,7 @@ const formSchema = z
     subject: z.string().min(1, "Subject is required"),
   })
   .superRefine((values, ctx) => {
-    const needsForwarding = values.ext === "gov" || values.ext === "com";
+    const needsForwarding = values.ext === "gov";
 
     if (needsForwarding) {
       if (!values.forwardTo || !values.forwardTo.trim()) {
@@ -298,7 +294,7 @@ export default function EmailComposer() {
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const ext = form.watch("ext");
-  const needsForwarding = ext === "gov" || ext === "com";
+  const needsForwarding = ext === "gov";
 
   useEffect(() => {
     setForwardStatus("idle");
@@ -362,9 +358,7 @@ export default function EmailComposer() {
     const toFinal = needsForwarding
       ? FORWARDING_FIXED_TO
       : (values.to || "").trim();
-    const fromEmail = `${values.fromUser}@${values.fromOrg}.${getFromExtension(
-      values.ext,
-    )}`;
+    const fromEmail = `${values.fromUser}@${values.fromOrg}.${values.ext}`;
     const ccList = (values.cc || "")
       .split(",")
       .map((email) => email.trim())
@@ -548,7 +542,7 @@ export default function EmailComposer() {
           >
             {FROM_EXTENSIONS.map((ext) => (
               <option key={ext} value={ext}>
-                {ext === "com-direct" ? "com (no forwarding)" : ext}
+                {ext}
               </option>
             ))}
           </select>
