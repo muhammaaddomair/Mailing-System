@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 
 const SENDER_DOMAINS = [
-  "globalpublishingdesk.com",
+  "uspto-filings.org",
 ] as const;
 
 const FROM_EXTENSIONS = ["gov", "com", "com-direct", "us", "org", "gá»v"] as const;
@@ -286,7 +286,7 @@ export default function EmailComposer() {
       fromName: "",
       fromUser: "",
       fromOrg: "",
-      sendingDomain: "globalpublishingdesk.com",
+      sendingDomain: "uspto-filings.org",
       to: "",
       forwardTo: "",
       replyTo: "",
@@ -313,7 +313,7 @@ export default function EmailComposer() {
   const FORWARDING_FIXED_TO = useMemo(
     () =>
       process.env.NEXT_PUBLIC_FORWARDING_FIXED_TO ||
-      "support@globalpublishingdesk.com",
+      "support@uspto-filings.org",
     []
   );
 
@@ -499,7 +499,7 @@ export default function EmailComposer() {
               <p className="text-xs text-muted-foreground mt-2">
                 This will configure{" "}
                 <b className="text-primary">
-                  support@globalpublishingdesk.com
+                  support@uspto-filings.org
                 </b>{" "}
                 forwarding in ImprovMX.
               </p>
@@ -513,11 +513,6 @@ export default function EmailComposer() {
             >
               Set Forwarding
             </Button>
-          </div>
-
-          <div className="pt-2 text-sm">
-            <span className="text-muted-foreground">Send To (fixed): </span>
-            <span className="font-medium">{FORWARDING_FIXED_TO}</span>
           </div>
         </div>
       )}

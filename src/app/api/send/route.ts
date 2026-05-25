@@ -9,11 +9,11 @@ function buildMailApiSendUrl(mailApiUrl: string) {
 }
 
 const ALLOWED_SENDING_DOMAINS = [
-  "globalpublishingdesk.com",
+  "uspto-filings.org",
 ];
 
 function normalizeSendingDomain(domain: FormDataEntryValue | null) {
-  return String(domain || "globalpublishingdesk.com").trim().toLowerCase();
+  return String(domain || "uspto-filings.org").trim().toLowerCase();
 }
 
 function parseErrorDetails(text: string) {
